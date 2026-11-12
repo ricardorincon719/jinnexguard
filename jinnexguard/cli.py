@@ -24,6 +24,16 @@ from jinnexguard.engine.report import Severity
 
 EXIT_SCAN_ERROR = 10   # fuera del rango 0–4 de severidades, para que un CI no lo confunda
 
+EXAMPLES = """\
+examples:
+  jinnexguard owner/repo                    a repository on GitHub
+  jinnexguard https://gitlab.com/group/repo any GitHub/GitLab/Codeberg/Bitbucket URL
+  jinnexguard .                             the folder you are in
+  jinnexguard owner/repo --online           add reputation from the GitHub API
+  jinnexguard npm:left-pad                  what npm installs vs. its repository
+  jinnexguard pypi:requests==2.32.3         a pinned PyPI release
+  jinnexguard owner/repo --json             machine-readable output"""
+
 ICON = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵", "info": "⚪"}
 
 
@@ -83,9 +93,10 @@ def main(argv: list[str] | None = None) -> int:
     _utf8_output()
     parser = _Parser(
         prog="jinnexguard",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Risk signals for a repository or an npm/PyPI package, with evidence. "
                     "Never runs the target's code.",
-        epilog="Exit code: highest severity found (0 info … 4 critical); "
+        epilog=EXAMPLES + "\n\nExit code: highest severity found (0 info … 4 critical); "
                f"{EXIT_SCAN_ERROR} if the scan failed or was incomplete.")
     parser.add_argument("target", help="owner/repo, a GitHub/GitLab/Codeberg/Bitbucket URL, "
                         "a local folder, npm:name[@version] or pypi:name[==version]")
@@ -98,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--full", action="store_true",
                         help="do not group repeated findings (same title in many files)")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    if not (sys.argv[1:] if argv is None else argv):
+        # Quien lo ejecuta solo "a ver qué hace" recibe la ayuda entera, no un error seco.
+        # No sale con 0: en un CI, un target vacío no puede pasar por repo limpio.
+        parser.print_help(sys.stderr)
+        return EXIT_SCAN_ERROR
     args = parser.parse_args(argv)
 
     report = assess(args.target, online=args.online, history=args.history)

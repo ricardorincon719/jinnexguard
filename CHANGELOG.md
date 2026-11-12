@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.2] - 2026-11-12
+
+### Added
+
+- Hosts named in the code: one informational finding lists the domains and
+  public addresses that appear in URLs outside documentation, tests and
+  comments. New finding category `network`.
+- AI endpoint overrides: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL` and similar
+  variables set to a server that is not the model provider's, in code,
+  installers, configuration and documentation. A bare IP address or plain
+  HTTP ranks higher, and so does a committed `.claude/settings.json`, which
+  takes effect when the folder is opened. Another known model provider or a
+  local proxy is reported at low severity.
+
+### Changed
+
+- A repository that overrides an AI endpoint now gets new findings, so its
+  exit code can be higher than with 1.0.1.
+- Command line: running `jinnexguard` with no arguments prints the full help,
+  with examples, instead of a one-line usage error. `--help` shows the same
+  examples. The exit code is still 10.
+
 ## [1.0.1] - 2026-11-11
 
 ### Added
