@@ -50,7 +50,7 @@ class Finding:
     category: str          # install-script | dangerous-pattern | impersonation | secret |
                            # secret-history | reputation | agent-config | agent-instructions |
                            # persistence | ci | submodule | published |
-                           # agent-docs | binary
+                           # agent-docs | binary | mcp-tool
     title: str             # qué se encontró, en una línea
     detail: str            # por qué importa / qué conviene revisar
     evidence: str = ""     # el fragmento real (comando, línea de código)

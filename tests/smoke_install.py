@@ -3,7 +3,7 @@
 No es parte de la suite (no empieza con test_). El CI lo corre después de instalar
 el wheel con pip, pipx o uvx:
 
-    python tests/smoke_install.py --cli jinnexguard --mcp jinnexguard-mcp --version 1.0.0
+    python tests/smoke_install.py --cli jinnexguard --mcp jinnexguard-mcp --version 1.0.1
 
 Cada opción es un comando completo entre comillas si lleva argumentos, p. ej.
 --mcp "uvx --from jinnexguard[mcp] jinnexguard-mcp".

@@ -9,12 +9,14 @@ from jinnexguard.engine.checks import (
     dangerous_patterns,
     impersonation,
     install_scripts,
+    mcp_surface,
     secrets,
     supply_chain,
 )
 
 # Chequeos que operan sobre los archivos del repo.
-FILE_CHECKS = (install_scripts, dangerous_patterns, impersonation, secrets, agents, supply_chain)
+FILE_CHECKS = (install_scripts, dangerous_patterns, impersonation, secrets, agents, mcp_surface,
+               supply_chain)
 
 __all__ = ["FILE_CHECKS", "install_scripts", "dangerous_patterns", "impersonation", "secrets",
-           "agents", "supply_chain"]
+           "agents", "mcp_surface", "supply_chain"]

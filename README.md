@@ -122,22 +122,33 @@ new files that are not ignored); a folder without `.git` is scanned entirely.
    injection in docs and hidden comments, project settings an agent loads
    (`.claude/settings.json`, `.mcp.json`), and AI CLIs launched without their
    safeguards.
-7. **Repository supply chain** — GitHub Actions workflows with dangerous
+7. **MCP tool descriptions** — the text an MCP server sends to the model on
+   every call: tool descriptions (including Python tool docstrings) and
+   parameter descriptions, in Python and JavaScript/TypeScript. That text is
+   part of the prompt and a clean README says nothing about it. JinnexGuard
+   lists it and looks for invisible text, instructions aimed at the agent
+   rather than at describing the tool, and descriptions that are built or
+   downloaded when the server runs.
+8. **Repository supply chain** — GitHub Actions workflows with dangerous
    triggers or permissions, shell injection in `run:`, actions not pinned to a
    commit SHA, submodules.
-8. **Impersonation** — package names that are nearly identical to popular ones.
-9. **Precompiled binaries** — programs, libraries and kernel drivers committed
-   to the repository (Windows, Linux and macOS formats, recognized by their
-   headers and never run), and whether the code, a script or the agent
-   instructions start them. Nobody can check that a binary matches its source.
-10. **Published package vs. repository** — what `npm install` or `pip install`
+9. **Impersonation** — package names that are nearly identical to popular ones.
+10. **Precompiled binaries** — programs, libraries and kernel drivers committed
+    to the repository (Windows, Linux and macOS formats, recognized by their
+    headers and never run), and whether the code, a script or the agent
+    instructions start them. Nobody can check that a binary matches its source.
+11. **Published package vs. repository** — what `npm install` or `pip install`
     downloads does not have to come from the repository shown on its page (the
     xz-utils backdoor lived in the release tarball, not in git). JinnexGuard
     downloads the artifact, extracts it as data and compares it with the
     repository at that version's commit or tag, using provenance (npm SLSA,
     PyPI Trusted Publishing) when it exists.
-11. **Reputation** (optional, `--online`) — age, stars vs. age, owner account.
+12. **Reputation** (optional, `--online`) — age, stars vs. age, owner account.
     Context, not a verdict.
+
+JinnexGuard looks at a server before you install it. What a running server
+advertises can still change afterwards, so pair it with a runtime scanner such
+as [Snyk Agent Scan](https://github.com/snyk/agent-scan) (formerly mcp-scan).
 
 Each finding has a severity (`info` to `critical`), a file, a line and the
 actual snippet. Repeated findings are grouped with a `count` and
