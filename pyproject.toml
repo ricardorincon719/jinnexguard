@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jinnexguard"
-version = "1.0.2"
+version = "1.0.3"
 description = "Risk signals for a repository or an npm/PyPI package, with evidence. Never runs the target's code."
 readme = "README.md"
 license = "Apache-2.0"

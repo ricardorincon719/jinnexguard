@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.0.3] - 2026-11-12
+
+### Added
+
+- MCP tool descriptions fingerprint: a SHA-256 of every tool and parameter
+  description written in the code, shown as an informational finding, plus a
+  short one per file. Spacing, order and file names do not change it; any
+  change to the wording does. Keep it when you approve a server and compare
+  it after an update. Descriptions built or downloaded at runtime are not
+  part of it, and neither are those in test files.
+- Scheduled GitHub Actions workflows that make commits on their own with
+  randomised content, which makes a repository look actively maintained.
+- Documentation links: URL shorteners, and download buttons that lead to a
+  site outside the repository and the usual code and package hosts.
+- Reputation (`--online`): repositories with more forks than stars.
+
+### Changed
+
+- A shell script that only prints a `curl … | sh` suggestion with `echo` or
+  `printf` is now reported at low severity instead of high. It stays high if
+  the output is piped, redirected to a file or wrapped in `$(…)`.
+- Repositories that match the new checks get new findings, so their exit code
+  can be higher than with 1.0.2.
+
+### Fixed
+
+- A target such as `repos/flask` that is an existing local folder is scanned
+  as that folder instead of being taken for the GitHub repository
+  `repos/flask`. The report says so; use the full URL for the GitHub one.
+
 ## [1.0.2] - 2026-11-12
 
 ### Added

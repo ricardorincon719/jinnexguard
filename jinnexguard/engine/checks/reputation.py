@@ -87,6 +87,16 @@ def run(target: str, *, now: datetime | None = None) -> tuple[list[Finding], dic
             "It proves nothing on its own; take it as a signal, not a verdict.",
             evidence=f"stars={stars}, age={repo_age}d, ≈{per_day}/day"))
 
+    # Un fork cuesta más que una estrella: que haya más forks que estrellas es raro y es
+    # la forma barata de inflar un repo con cuentas automáticas.
+    forks = context["forks"]
+    if stars >= 50 and forks > stars:
+        findings.append(Finding(
+            Severity.LOW, "reputation", f"More forks ({forks}) than stars ({stars})",
+            "People usually star far more often than they fork. The opposite can mean "
+            "automated accounts, or a template meant to be forked; context, not a verdict.",
+            evidence=f"forks={forks}, stars={stars}"))
+
     try:
         user = _get(f"{API}/users/{owner}")
         account_age = _age_days(user.get("created_at", ""), now)

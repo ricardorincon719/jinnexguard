@@ -108,8 +108,12 @@ def acquire(target: str, *, full_history: bool = False) -> Iterator[tuple[Path, 
     El directorio del clon se borra al salir; una ruta local no se toca.
     """
     url = normalize_url(target)
+    path = Path(target.strip()).expanduser()
+    # `owner/repo` también es una ruta relativa válida: si esa carpeta existe, es lo que
+    # la persona tiene delante. Para el repo de GitHub del mismo nombre, la URL completa.
+    if url is not None and _SHORTHAND.match(target.strip()) and path.is_dir():
+        url = None
     if url is None:
-        path = Path(target).expanduser()
         if not path.is_dir():
             raise FetchError(f"Not a supported URL or an existing folder: {target}")
         yield path.resolve(), "local"

@@ -210,5 +210,83 @@ def _endpoints(files: list[tuple[Path, str]]) -> list[Finding]:
     return findings
 
 
+# --- Enlaces de la documentación: a dónde manda el README a bajar las cosas ---
+_LINK_DOC_SUFFIXES = {".md", ".mdx", ".markdown", ".rst", ".html", ".htm"}
+_SHORTENERS = ("bit.ly", "tinyurl.com", "cutt.ly", "rebrand.ly", "is.gd", "shorturl.at", "rb.gy",
+               "t.ly", "tiny.cc", "goo.su", "clck.ru", "shorturl.asia", "urlz.fr", "ow.ly")
+_SHORT_URL = re.compile(r"https?://(?:www\.)?(" + "|".join(re.escape(d) for d in _SHORTENERS)
+                        + r")/[\w\-./?=&%+]+", re.IGNORECASE)
+_DOWNLOAD_WORD = re.compile(r"(?i)\b(?:download|install(?:er)?|setup|get\s+it|launcher|loader|"
+                            r"\.exe|\.zip|\.rar|\.msi|\.dmg|\.apk)\b|\bGET[-_ ]")
+# Un botón de descarga: enlace cuya etiqueta (texto o insignia) dice Download / GET.
+_MD_BUTTON = re.compile(
+    r"\[(?P<label>(?:!\[[^\]]*\]\([^)]*\)|[^\]\[])*)\]\((?P<url>https?://[^)\s]+)\)")
+_HTML_LINK = re.compile(r"""<a\b[^>]*\bhref=["'](?P<url>https?://[^"']+)["']""", re.IGNORECASE)
+# La etiqueta EMPIEZA con Download o con GET en mayúsculas: "Get started" o una frase que
+# menciona una descarga no son un botón.
+_BUTTON_LABEL = re.compile(r"^\W*(?:[Dd]ownload|DOWNLOAD|GET)\b|badge/(?:GET|[Dd]ownload|DOWNLOAD)[-_]|"
+                           r"\balt=\"(?:GET|[Dd]ownload|DOWNLOAD)\b")
+# Donde vive el código o donde se publican paquetes y aplicaciones: la descarga es rastreable.
+_CODE_HOSTS = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "sourceforge.net",
+               "npmjs.com", "pypi.org", "crates.io", "rubygems.org", "nuget.org", "pkg.go.dev",
+               "hub.docker.com", "ghcr.io", "apple.com", "google.com", "microsoft.com",
+               "mozilla.org", "visualstudio.com", "jetbrains.com", "flathub.org", "snapcraft.io",
+               "brew.sh", "f-droid.org", "readthedocs.io", "shields.io",
+               # requisitos de siempre: el runtime que el proyecto pide instalar
+               "nodejs.org", "python.org", "rust-lang.org", "rustup.rs", "go.dev", "java.com",
+               "oracle.com", "adoptium.net", "docker.com", "git-scm.com", "ruby-lang.org")
+SHORTENER_TITLE = "Shortened link in the documentation"
+SHORTENER_DETAIL = ("A URL shortener hides where the link goes, and its owner can point it "
+                    "somewhere else later. ")
+OUTSIDE_TITLE = "Download button leads outside the repository"
+OUTSIDE_DETAIL = ("The documentation sends you to another site for the download. What you "
+                  "would run is not in this repository, so nothing in this report covers it.")
+
+
+def _doc_links(files: list[tuple[Path, str]]) -> list[Finding]:
+    findings: list[Finding] = []
+    seen: set[str] = set()   # destinos de descarga ya reportados en este repo
+    for path, text in files:
+        if path.suffix.lower() not in _LINK_DOC_SUFFIXES or "://" not in text:
+            continue
+        lines = text.splitlines()
+        shortened = [(n, line, m) for n, line in enumerate(lines, start=1)
+                     for m in [_SHORT_URL.search(line)] if m]
+        for lineno, line, match in shortened[:MAX_PER_TITLE_PER_FILE]:
+            pushes = len(shortened) >= 3 or bool(_DOWNLOAD_WORD.search(line))
+            findings.append(Finding(
+                Severity.MEDIUM if pushes else Severity.LOW, CATEGORY,
+                f"{SHORTENER_TITLE} ({path})",
+                SHORTENER_DETAIL + ("Here it is the link the page pushes you to follow."
+                                    if pushes else "Check the destination before following it."),
+                evidence=_snippet(line[max(0, match.start() - 80):]), path=str(path), line=lineno))
+        # El botón cuenta en la portada del repo (README o index.html de la raíz) y cada
+        # destino una sola vez: 30 traducciones del README no son 30 señales.
+        if len(path.parts) != 1:
+            continue
+        for index, line in enumerate(lines):
+            for match in (*_MD_BUTTON.finditer(line), *_HTML_LINK.finditer(line)):
+                url = match.group("url")
+                # En HTML la etiqueta suele ir en las líneas siguientes (<a> … <img alt="GET …">).
+                label = match.groupdict().get("label")
+                if label is None:
+                    label = " ".join(lines[index:index + 3])[match.end() - 0:][:400]
+                    label = label.split("</a>")[0]
+                if not _BUTTON_LABEL.search(label):
+                    continue
+                try:
+                    host = (urlsplit(url).hostname or "").lower()
+                except ValueError:
+                    continue
+                if not host or host in seen or _is_placeholder(host) or _is_local(host) \
+                        or _under(host, _CODE_HOSTS) or _under(host, _SHORTENERS):
+                    continue
+                seen.add(host)
+                findings.append(Finding(
+                    Severity.LOW, CATEGORY, f"{OUTSIDE_TITLE} ({path})", OUTSIDE_DETAIL,
+                    evidence=_snippet(url), path=str(path), line=index + 1))
+    return findings
+
+
 def run(files: list[tuple[Path, str]]) -> list[Finding]:
-    return _inventory(files) + _endpoints(files)
+    return _inventory(files) + _endpoints(files) + _doc_links(files)

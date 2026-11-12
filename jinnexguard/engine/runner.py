@@ -16,7 +16,8 @@ from jinnexguard.engine.checks import published as published_check
 from jinnexguard.engine.checks import reputation as reputation_check
 from jinnexguard.engine.checks import secrets as secrets_check
 from jinnexguard.engine.fetch import (
-    FetchError, acquire, clone_at_ref, git_origin_url, git_tracked_files, iter_text_files)
+    FetchError, acquire, clone_at_ref, git_origin_url, git_tracked_files, iter_text_files,
+    normalize_url)
 from jinnexguard.engine.report import Finding, Report, Severity
 
 
@@ -183,6 +184,12 @@ def assess(target: str, *, online: bool = False, history: bool = False) -> Repor
     try:
         with acquire(target, full_history=history) as (root, source):
             report.source = source
+            if source == "local" and normalize_url(target) is not None:
+                # No dejar dudas de qué se miró cuando el nombre servía para las dos cosas.
+                report.context["target_note"] = (
+                    f"'{target.strip()}' is an existing local folder, so that folder was "
+                    f"scanned. For the GitHub repository of the same name use "
+                    f"https://github.com/{target.strip()}")
             if source == "local" and online:
                 # De un clon local, la reputación es la de su remoto `origin`.
                 reputation_target = git_origin_url(root) or target

@@ -47,6 +47,15 @@ _EXEC_HINT = re.compile(r"\b(?:exec\w*|spawn\w*|system|popen|run|call|check_outp
                         r"execSync|execa)\s*\(|\b(?:ba|z|da)?sh\s+-c\b|\$`|\bBun\.\$|"
                         r"child_process|shell\s*=\s*True|\bCommand::new\b")
 _SHELL_EVAL = re.compile(r"\b(?:ba|z|da)?sh\s+-c\b|\beval\b")
+# `echo "…"` que solo imprime: ni tubería ni redirección fuera de las comillas, ni `$(…)`.
+_ECHO = re.compile(r"^\s*(?:echo|printf)\b")
+_QUOTED = re.compile(r"\"(?:\\.|[^\"\\])*\"|'[^']*'")
+
+
+def _only_prints(line: str) -> bool:
+    if not _ECHO.match(line) or "$(" in line or "`" in line:
+        return False
+    return not re.search(r"[|>]", _QUOTED.sub("", line))
 # Un heredoc que no alimenta a un shell es texto (la ayuda de un instalador).
 _HEREDOC_OPEN = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
 # Una línea que es solo un nombre entre comillas (un elemento de lista): nombra, no ejecuta.
@@ -440,7 +449,8 @@ def run(files: list[tuple[Path, str]]) -> list[Finding]:
                         if suffix in _CODE_SUFFIXES and not _EXEC_HINT.search(line):
                             extra += 1
                         elif is_shell and quoted and not _SHELL_EVAL.search(line):
-                            extra += 1   # un echo "curl … | sh" de ayuda
+                            # un echo "curl … | sh" de ayuda; si solo imprime, baja más
+                            extra += 3 if _only_prints(line) else 1
                     if title == CREDENTIALS_TITLE and not _READS_FILE.search(line):
                         extra += 1   # un placeholder o un texto de ayuda que nombra la ruta
                     if title == ENV_TITLE and _SENDS_OR_ENCODES.search(line):

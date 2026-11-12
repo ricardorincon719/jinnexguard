@@ -16,6 +16,7 @@ leer, porque puede cambiar después de que la aprobaste.
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from bisect import bisect_right
 from pathlib import Path
@@ -99,6 +100,7 @@ class _Collector:
         self.counts: dict[str, int] = {}
         self.downgrade = 2 if _TEST_HINT.search(path.as_posix()) else 0
         self.described = 0
+        self.texts: list[str] = []   # las descripciones leídas, para la huella
 
     def add(self, severity: Severity, title: str, detail: str, evidence: str, line: int) -> None:
         if self.counts.get(title, 0) >= MAX_PER_PATTERN_PER_FILE:
@@ -113,6 +115,7 @@ class _Collector:
         if not text.strip():
             return
         self.described += 1
+        self.texts.append(_normalize(text))
         lines = text.splitlines() or [""]
         for index, line in enumerate(lines):
             if _HIDDEN.search(line):
@@ -158,6 +161,25 @@ class _Collector:
             report(match, severity, _REUSED[title], detail)
 
 
+# --- Huella: para notar que el texto cambió entre la versión aprobada y la siguiente ---
+FINGERPRINT_TITLE = "MCP tool descriptions fingerprint"
+FINGERPRINT_DETAIL = (
+    "A fingerprint of every tool and parameter description written in the code. Spacing, "
+    "line breaks, order and file names do not change it; any change to the wording does. "
+    "Keep it when you approve this server: if a later version shows a different value, the "
+    "text the model reads has changed and is worth reading again. Descriptions built or "
+    "downloaded at runtime are not part of it.")
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
+def fingerprint(texts: list[str]) -> str:
+    """sha256 de las descripciones normalizadas y ordenadas (mover código no la cambia)."""
+    return hashlib.sha256("\0".join(sorted(texts)).encode("utf-8", "surrogatepass")).hexdigest()
+
+
 # --- Python: con el árbol sintáctico, sin importar nada ---
 def _call_name(node: ast.AST) -> str:
     """`mcp.tool` → "tool"; `Tool` → "Tool"; `mcp.tool()` → "tool"."""
@@ -198,11 +220,11 @@ def _python_source(node: ast.AST) -> str:
         return ""
 
 
-def _check_python(path: Path, text: str) -> list[Finding]:
+def _check_python(path: Path, text: str) -> _Collector | None:
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError, RecursionError, MemoryError):
-        return []
+        return None
     out = _Collector(path)
     constants = {target.id: (stmt.value.value, stmt.value.lineno)
                  for stmt in tree.body if isinstance(stmt, ast.Assign)
@@ -246,7 +268,7 @@ def _check_python(path: Path, text: str) -> list[Finding]:
                 if keyword.arg == "description" and name not in _TOOL_DECORATORS:
                     if name in _TOOL_CLASSES or name in ("Field", "Annotated", "Parameter"):
                         description(keyword.value)
-    return _finish(out)
+    return out
 
 
 # --- JavaScript / TypeScript: literales junto a `description`, `.tool(` y `.describe(` ---
@@ -276,7 +298,7 @@ def _js_unescape(value: str) -> str:
     return _JS_ESCAPE.sub(replace, value)
 
 
-def _check_javascript(path: Path, text: str) -> list[Finding]:
+def _check_javascript(path: Path, text: str) -> _Collector:
     out = _Collector(path)
     line_starts = [0]
     for match in re.finditer(r"\n", text):
@@ -294,7 +316,7 @@ def _check_javascript(path: Path, text: str) -> list[Finding]:
         line = bisect_right(line_starts, match.start("expr"))
         if _NETWORK_CALL.search(expression):
             out.add(Severity.MEDIUM, REMOTE_TITLE, REMOTE_DETAIL, expression, line)
-    return _finish(out)
+    return out
 
 
 def _finish(out: _Collector) -> list[Finding]:
@@ -304,15 +326,34 @@ def _finish(out: _Collector) -> list[Finding]:
         Severity.INFO, CATEGORY, f"MCP tool descriptions ({out.path})",
         "Text this server sends to the model on every call (tool and parameter descriptions). "
         "The agent treats it as trusted. Read it as you would read a prompt.",
-        evidence=f"{out.described} description" + ("" if out.described == 1 else "s"), path=str(out.path)), *out.findings]
+        evidence=f"{out.described} description" + ("" if out.described == 1 else "s")
+                 + (f", sha256:{fingerprint(out.texts)[:16]}" if out.texts else ""),
+        path=str(out.path)), *out.findings]
 
 
 def run(files: list[tuple[Path, str]]) -> list[Finding]:
     findings: list[Finding] = []
+    texts: list[str] = []
+    sources = 0
     for path, text in files:
         suffix = path.suffix.lower()
         if suffix in PY_SUFFIXES and _PY_MCP.search(text):
-            findings += _check_python(path, text)
+            out = _check_python(path, text)
         elif suffix in JS_SUFFIXES and _JS_MCP.search(text):
-            findings += _check_javascript(path, text)
+            out = _check_javascript(path, text)
+        else:
+            continue
+        if out is None:
+            continue
+        findings += _finish(out)
+        # Los tests no son lo que el servidor le manda al modelo: no entran en la huella.
+        if out.texts and not out.downgrade:
+            texts += out.texts
+            sources += 1
+    if texts:
+        findings.insert(0, Finding(
+            Severity.INFO, CATEGORY, FINGERPRINT_TITLE, FINGERPRINT_DETAIL,
+            evidence=f"sha256:{fingerprint(texts)} ({len(texts)} description"
+                     + ("" if len(texts) == 1 else "s") + f" in {sources} file"
+                     + ("" if sources == 1 else "s") + ")"))
     return findings

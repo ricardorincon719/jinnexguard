@@ -129,14 +129,18 @@ new files that are not ignored); a folder without `.git` is scanned entirely.
    lists it and looks for invisible text, instructions aimed at the agent
    rather than at describing the tool, and descriptions that are built or
    downloaded when the server runs.
+   It also prints a fingerprint (SHA-256) of that text: keep it when you
+   approve a server and compare it when you update, to see whether the
+   descriptions changed.
 8. **Network destinations** — the hosts named in the code, listed in one place
    so you can see where a tool or an MCP server may talk to, and settings that
    point your AI agent at someone else's server (`ANTHROPIC_BASE_URL`,
    `OPENAI_BASE_URL` and similar): through that server pass your prompts, your
-   code and your API key.
+   code and your API key. In the documentation, shortened links and download
+   buttons that send you to another site for the thing you would run.
 9. **Repository supply chain** — GitHub Actions workflows with dangerous
    triggers or permissions, shell injection in `run:`, actions not pinned to a
-   commit SHA, submodules.
+   commit SHA, workflows that commit on a timer to fake activity, submodules.
 10. **Impersonation** — package names that are nearly identical to popular ones.
 10. **Precompiled binaries** — programs, libraries and kernel drivers committed
     to the repository (Windows, Linux and macOS formats, recognized by their

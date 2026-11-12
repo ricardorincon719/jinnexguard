@@ -5,4 +5,4 @@ vetear un repo sea rápido. El motor (`jinnexguard.engine`) es stdlib puro y nun
 ejecuta el código del objetivo; la capa MCP es un envoltorio aparte.
 """
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"

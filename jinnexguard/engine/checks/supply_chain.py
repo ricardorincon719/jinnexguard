@@ -16,6 +16,12 @@ from pathlib import Path
 
 from jinnexguard.engine.report import Finding, Severity
 
+# Actividad fingida: un workflow programado que commitea solo, con contenido al azar.
+_SCHEDULE = re.compile(r"(?m)^\s*(?:-\s*)?schedule\s*:|^\s*-?\s*cron\s*:")
+_COMMITS = re.compile(r"createOrUpdateFileContents|createCommit\b|\bgit\s+(?:commit|push)\b|"
+                      r"git-auto-commit-action|add-and-commit")
+_RANDOM = re.compile(r"Math\.random\s*\(|\$\{?RANDOM\b|\bshuf\b|/dev/urandom|"
+                     r"\brandom\.(?:choice|randint|random)\s*\(")
 _PRIVILEGED_TRIGGER = re.compile(r"\b(pull_request_target|workflow_run)\b")
 _CHECKOUT_LINE = re.compile(r"^\s*(?:-\s*)?ref:|\bcheckout\b|\bgit\s+fetch\b|\bgh\s+pr\s+checkout\b")
 _PR_CHECKOUT = re.compile(
@@ -53,6 +59,18 @@ def _check_workflow(path: Path, text: str) -> list[Finding]:
              "stranger; check that it does not check out or run the PR's code. ")
             + "A risk for the repo owner, not for whoever installs it.",
             evidence=line.strip() + (f"  + {checkout.group(0)}" if checkout else ""),
+            path=str(path), line=lineno))
+
+    commits = _COMMITS.search(text)
+    random = _RANDOM.search(text)
+    if commits and random and _SCHEDULE.search(text):
+        lineno = text.count("\n", 0, random.start()) + 1
+        findings.append(Finding(
+            Severity.MEDIUM, "ci", f"Scheduled workflow that commits randomised content ({path})",
+            "It runs on a timer, makes commits on its own and uses random values to build "
+            "them. That is how a repository is made to look actively maintained when nobody "
+            "is working on it. Compare the commit history with the code that actually changed.",
+            evidence=f"{lines[lineno - 1].strip()[:120]}  + {commits.group(0)}",
             path=str(path), line=lineno))
 
     run_indent: int | None = None
